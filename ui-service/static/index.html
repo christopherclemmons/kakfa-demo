@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Kafka Order Stream</title>
+  <style>
+    body { font-family: sans-serif; margin: 40px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { padding: 10px; border-bottom: 1px solid #ddd; }
+    th { background: #333; color: white; text-align: left; }
+  </style>
+</head>
+<body>
+  <h1>Live Orders</h1>
+  <table id="orders">
+    <thead>
+      <tr><th>Time</th><th>Order ID</th><th>Customer</th><th>Item</th><th>Status</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <script>
+    const ws = new WebSocket("ws://localhost:8000/ws");
+    const table = document.querySelector("#orders tbody");
+
+    // keep track of existing orders by ID
+    const orders = {};
+
+    ws.onmessage = (event) => {
+      const data = JSON.parse(event.data);
+      const now = new Date().toLocaleTimeString();
+
+      const rowId = `order-${data.order_id}`;
+      const existing = document.getElementById(rowId);
+
+      if (existing) {
+        // update status cell
+        existing.querySelector(".status").textContent = data.status || "—";
+      } else {
+        // insert new row at top
+        const row = document.createElement("tr");
+        row.id = rowId;
+        row.innerHTML = `
+          <td>${now}</td>
+          <td>${data.order_id}</td>
+          <td>${data.customer}</td>
+          <td>${data.item}</td>
+          <td class="status">${data.status || "—"}</td>
+        `;
+        table.prepend(row);
+      }
+    };
+
+    ws.onclose = () => {
+      console.log("WebSocket closed. Reconnecting...");
+      setTimeout(() => location.reload(), 2000);
+    };
+  </script>
+</body>
+</html>
