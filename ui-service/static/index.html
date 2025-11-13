@@ -1,58 +1,216 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Kafka Order Stream</title>
-  <style>
-    body { font-family: sans-serif; margin: 40px; }
-    table { border-collapse: collapse; width: 100%; }
-    th, td { padding: 10px; border-bottom: 1px solid #ddd; }
-    th { background: #333; color: white; text-align: left; }
-  </style>
+  <meta charset="utf-8" />
+  <title>Kafka Order Stream — Live</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --fresh:   #e3f2fd;   /* light blue background */
+    --waiting: #fff59d;   /* yellow */
+    --delayed: #ffcc80;   /* orange */
+    --stuck:   #ef9a9a;   /* red */
+    --deliv:   #c8e6c9;   /* green */
+
+    --pill-blue:   #1565c0;
+    --pill-yellow: #f9a825;
+    --pill-orange: #ef6c00;
+    --pill-red:    #c62828;
+    --pill-green:  #2e7d32;
+  }
+
+  body {
+    font-family: "JetBrains Mono", monospace;
+    background: #ffffff;
+    color: #111;
+    margin: 40px;
+  }
+
+  h1 {
+    margin-bottom: 18px;
+    font-weight: 700;
+    font-size: 1.9rem;
+    color: #000;
+    letter-spacing: -0.5px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    background: #fff;
+    border: 2px solid #000;
+    border-radius: 0;                     /* sharp edges */
+    box-shadow: 0 4px 0 #000;             /* subtle hard shadow */
+  }
+
+  thead th {
+    background: #000;
+    color: #fff;
+    text-align: left;
+    padding: 12px 14px;
+    font-weight: 600;
+    font-size: 13px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-right: 1px solid #333;
+  }
+  thead th:last-child { border-right: none; }
+
+  tbody td {
+    padding: 12px 14px;
+    border-top: 1px solid #222;
+    font-size: 13px;
+  }
+
+  tbody tr:nth-child(even) td {
+    background: #f7f7f7;
+  }
+
+  tr {
+    transition: background-color 0.2s ease;
+  }
+
+  /* highlight intensity */
+  tr[data-status="fresh"]   { background: var(--fresh); }
+  tr[data-status="waiting"] { background: var(--waiting); }
+  tr[data-status="delayed"] { background: var(--delayed); }
+  tr[data-status="stuck"]   { background: var(--stuck); }
+  tr[data-status="delivered"] { background: var(--deliv); }
+
+  .pill {
+    display: inline-block;
+    padding: 3px 8px;
+    border: 1.5px solid currentColor;
+    border-radius: 2px;                 /* sharp corners */
+    font-weight: 700;
+    font-size: 12px;
+    background: transparent;
+  }
+  .pill.blue   { color: var(--pill-blue); }
+  .pill.yellow { color: var(--pill-yellow); }
+  .pill.orange { color: var(--pill-orange); }
+  .pill.red    { color: var(--pill-red); }
+  .pill.green  { color: var(--pill-green); }
+
+  .muted {
+    color: #333;
+  }
+
+  /* sharper hover highlight */
+  tbody tr:hover {
+    background: #e0f7fa !important;
+  }
+</style>
+
 </head>
 <body>
-  <h1>Live Orders</h1>
-  <table id="orders">
+  <h1>🚚 Kafka Order Stream (Live)</h1>
+
+  <table id="events">
     <thead>
-      <tr><th>Time</th><th>Order ID</th><th>Customer</th><th>Item</th><th>Status</th></tr>
+      <tr>
+        <th style="width:110px;">Order ID</th>
+        <th>Customer</th>
+        <th>Item</th>
+        <th style="width:160px;">Status</th>
+        <th style="width:170px;">Last Updated</th>
+      </tr>
     </thead>
     <tbody></tbody>
   </table>
 
   <script>
-    const ws = new WebSocket("ws://localhost:8000/ws");
-    const table = document.querySelector("#orders tbody");
+    const WS_URL = "ws://localhost:8000/ws";
+    const AGE_FRESH = 30, AGE_WAITING = 90, AGE_DELAYED = 180;
 
-    // keep track of existing orders by ID
-    const orders = {};
+    const ws = new WebSocket(WS_URL);
+    const tableBody = document.querySelector("#events tbody");
+    const rowsByOrder = new Map();
 
-    ws.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      const now = new Date().toLocaleTimeString();
+    const nowStr = () => new Date().toLocaleTimeString();
+    const normalize = s => String(s || "").trim().toLowerCase();
 
-      const rowId = `order-${data.order_id}`;
-      const existing = document.getElementById(rowId);
-
-      if (existing) {
-        // update status cell
-        existing.querySelector(".status").textContent = data.status || "—";
-      } else {
-        // insert new row at top
-        const row = document.createElement("tr");
-        row.id = rowId;
-        row.innerHTML = `
-          <td>${now}</td>
-          <td>${data.order_id}</td>
-          <td>${data.customer}</td>
-          <td>${data.item}</td>
-          <td class="status">${data.status || "—"}</td>
-        `;
-        table.prepend(row);
+    function setRowBackground(row, status) {
+      if (status === "delivered") {
+        row.style.backgroundColor = "var(--deliv)";
+        return;
       }
-    };
+      const age = (Date.now() - Number(row.dataset.lastUpdate)) / 1000;
+      let color = "var(--fresh)", ageClass = "fresh";
+      if (age < AGE_FRESH) { color = "var(--fresh)"; ageClass = "fresh"; }
+      else if (age < AGE_WAITING) { color = "var(--waiting)"; ageClass = "waiting"; }
+      else if (age < AGE_DELAYED) { color = "var(--delayed)"; ageClass = "delayed"; }
+      else { color = "var(--stuck)"; ageClass = "stuck"; }
+      row.style.backgroundColor = color;
 
-    ws.onclose = () => {
-      console.log("WebSocket closed. Reconnecting...");
-      setTimeout(() => location.reload(), 2000);
+      const pill = row.querySelector(".pill");
+      if (!pill) return;
+      pill.className = "pill " + (
+        ageClass === "fresh"   ? "blue"   :
+        ageClass === "waiting" ? "yellow" :
+        ageClass === "delayed" ? "orange" : "red"
+      );
+    }
+
+    function scheduleRemoval(row) {
+      if (row._removeTimer) clearTimeout(row._removeTimer);
+      row._removeTimer = setTimeout(() => {
+        rowsByOrder.delete(row.dataset.orderId);
+        row.remove();
+      }, 3000);
+    }
+
+    function renderRow(data) {
+      const id = String(data.order_id);
+      const statusNorm = normalize(data.status);
+      const statusRaw = statusNorm;
+      let row = rowsByOrder.get(id);
+      if (!row) {
+        row = document.createElement("tr");
+        row.dataset.orderId = id;
+        row.innerHTML = `
+          <td class="muted">${id}</td>
+          <td>${data.customer ?? ""}</td>
+          <td>${data.item ?? ""}</td>
+          <td><span class="pill blue">${statusRaw}</span></td>
+          <td class="muted">${nowStr()}</td>
+        `;
+        tableBody.insertBefore(row, tableBody.firstChild);
+        rowsByOrder.set(id, row);
+      } else {
+        row.children[1].textContent = data.customer ?? row.children[1].textContent;
+        row.children[2].textContent = data.item ?? row.children[2].textContent;
+        row.children[4].textContent = nowStr();
+      }
+      row.dataset.lastUpdate = Date.now();
+      row.dataset.status = statusNorm;
+      setRowBackground(row, statusNorm);
+      if (statusNorm === "delivered") {
+        const pill = row.querySelector(".pill");
+        pill.className = "pill green";
+        pill.textContent = "delivered";
+        scheduleRemoval(row);
+      }
+    }
+
+    // update background aging every 2s
+    setInterval(() => {
+      rowsByOrder.forEach(row => {
+        if (row.dataset.status !== "delivered")
+          setRowBackground(row, row.dataset.status);
+      });
+    }, 2000);
+
+    ws.onmessage = e => {
+      const msg = JSON.parse(e.data);
+      const statusNorm = normalize(msg.status);
+      renderRow({
+        order_id: msg.order_id,
+        customer: msg.customer,
+        item: msg.item,
+        status: statusNorm
+      });
     };
   </script>
 </body>

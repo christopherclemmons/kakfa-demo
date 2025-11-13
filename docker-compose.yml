@@ -31,7 +31,7 @@ services:
   delivery-service:
     build: ./delivery-service
     deploy:
-      replicas: 15
+      replicas: 1
     depends_on:
       - kafka
 

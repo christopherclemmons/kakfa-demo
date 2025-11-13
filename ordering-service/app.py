@@ -2,6 +2,9 @@ import json, time, random
 from kafka import KafkaProducer
 from kafka.errors import NoBrokersAvailable
 
+# ----------------------------------------------------------------
+# Try to connect to Kafka
+# ----------------------------------------------------------------
 for i in range(10):
     try:
         producer = KafkaProducer(
@@ -16,6 +19,9 @@ for i in range(10):
 else:
     raise Exception("Kafka not reachable")
 
+# ----------------------------------------------------------------
+# Simulated menu + customers
+# ----------------------------------------------------------------
 menu_items = ["Pizza", "Burger", "Taco", "Sushi", "Salad", "Wrap", "Wings"]
 customers = ["Alex", "Jordan", "Taylor", "Casey", "Sam", "Riley"]
 
@@ -29,14 +35,20 @@ while True:
 
     order = {
         "order_id": order_id,
-        "customer": random.choice(customers),
+        "customer": random.choice(customers),  # ✅ string only
         "item": random.choice(menu_items),
         "timestamp": time.strftime("%H:%M:%S"),
         "status": "PLACED",
     }
 
-    producer.send("orders", order)
+    # ✅ send dict directly (no extra json.dumps)
+    producer.send(
+        "orders",
+        key=str(order_id).encode(),  # key can be bytes
+        value=order,                 # serializer handles encoding
+    )
     producer.flush()
+
     print(
         f"🧾 [{order['timestamp']}] Order {order_id} placed by {order['customer']} for {order['item']}",
         flush=True,
